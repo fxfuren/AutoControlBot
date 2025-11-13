@@ -1,0 +1,11 @@
+services:
+  bot:
+    build: .
+    container_name: auto_control_bot
+    restart: always
+    volumes:
+      - ./src:/app/src
+    environment:
+      BOT_TOKEN: '${BOT_TOKEN}'
+      GOOGLE_SHEETS_URL: '${GOOGLE_SHEETS_URL}'
+      GOOGLE_CREDS_PATH: '/app/service_account.json'
