@@ -10,7 +10,6 @@ async def chats_keyboard(bot: Bot, user_id: int, chats: list[int]):
     kb = InlineKeyboardBuilder()
 
     for chat_id in chats:
-        # снимаем бан/кик
         await ensure_user_can_join(bot, user_id, chat_id)
 
         chat = await get_chat(bot, chat_id)

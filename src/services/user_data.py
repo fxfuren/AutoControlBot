@@ -5,28 +5,33 @@ from typing import Any, Iterable, Mapping
 
 
 class UserDataError(ValueError):
-    """Raised when user data cannot be normalised."""
-
+    """Ошибка нормализации данных пользователя."""
 
 _CHATS_SPLIT_RE = re.compile(r"[,\s]+")
 
 
 def parse_chat_ids(raw: Any) -> list[int]:
-    """Parse chat identifiers from a cell value.
+    """
+    Преобразует значение из таблицы в список chat_id (целых чисел).
 
-    Supports strings with comma/whitespace separated identifiers or an
-    iterable of identifiers. Invalid values are ignored.
+    Поддерживает:
+      • строки вида "123, 456 789"
+      • списки / массивы значений
+      • ячейки с несколькими id, разделёнными пробелами и запятыми
+
+    Неверные значения пропускаются.
+    Дубликаты удаляются.
     """
 
     values: Iterable[Any]
 
     if raw is None:
         return []
-
     if isinstance(raw, str):
         values = (part.strip() for part in _CHATS_SPLIT_RE.split(raw))
     elif isinstance(raw, Iterable) and not isinstance(raw, (bytes, bytearray)):
         values = (str(item).strip() for item in raw)
+
     else:
         return []
 
@@ -52,7 +57,14 @@ def parse_chat_ids(raw: Any) -> list[int]:
 
 
 def normalize_user_record(record: Mapping[str, Any]) -> dict[str, Any]:
-    """Normalise a raw user record coming from Google Sheets."""
+    """
+    Нормализует одну строку таблицы Google Sheets.
+
+    Гарантирует, что:
+      • tg_id — целое число
+      • строки очищены от None и пробелов
+      • chats — список корректных chat_id
+    """
 
     if "tg_id" not in record:
         raise UserDataError("tg_id is required")
@@ -65,7 +77,6 @@ def normalize_user_record(record: Mapping[str, Any]) -> dict[str, Any]:
     username = _clean_str(record.get("username"))
     fio = _clean_str(record.get("fio"))
     role = _clean_str(record.get("role"))
-
     chats_raw = record.get("chats")
     chats = parse_chat_ids(chats_raw)
 
@@ -79,6 +90,10 @@ def normalize_user_record(record: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _clean_str(value: Any) -> str:
+    """
+    Приводит значение к строке и удаляет лишние пробелы.
+    None → "".
+    """
     if value is None:
         return ""
 

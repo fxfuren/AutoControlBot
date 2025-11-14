@@ -2,7 +2,7 @@ from contextlib import suppress
 from aiogram import Router, types, Bot
 from aiogram.filters import Command
 from services.roles import get_user_by_tg_id, get_user_chats
-from handlers.buttons import chats_keyboard
+from handlers.chats_buttons import chats_keyboard
 
 router = Router()
 
@@ -37,8 +37,7 @@ async def start_handler(message: types.Message, bot: Bot):
     keyboard = await chats_keyboard(bot, user_id, chats)
 
     response = await message.answer(
-        f"👋 Привет, {user.get('fio','пользователь')}!\n"
-        "Вот ваши доступные чаты:",
+        f"Вот ваши доступные чаты:",
         reply_markup=keyboard
     )
 
