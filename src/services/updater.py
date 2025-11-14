@@ -4,6 +4,8 @@ import traceback
 from utils.logger import logger
 from services.gsheets import load_table, sheet_changed
 from storage.cache import cache
+from services.notifier import detect_changes, notify_user
+from bot import bot
 
 CACHE_PATH = "src/storage/cache.json"
 
@@ -31,11 +33,21 @@ async def auto_update_loop():
             if sheet_changed():
                 logger.info("🔄 Таблица изменилась — обновляю кэш")
 
+                old_data = cache.copy()
+
                 data = load_table()
                 save_cache(data)
 
+                # обновляем память
                 cache.clear()
                 cache.update({str(row["tg_id"]): row for row in data})
+
+                # ищем изменения
+                events = detect_changes(old_data, cache)
+
+                # отправляем уведомления
+                for event in events:
+                    asyncio.create_task(notify_user(bot, event))
 
         except Exception:
             logger.error("Ошибка автообновления:\n" + traceback.format_exc())

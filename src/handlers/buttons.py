@@ -1,5 +1,7 @@
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram import Bot
+from datetime import datetime, timedelta
+
 
 async def chats_keyboard(bot: Bot, chats: list[str]):
     kb = InlineKeyboardBuilder()
@@ -7,10 +9,19 @@ async def chats_keyboard(bot: Bot, chats: list[str]):
     for chat_id in chats:
         try:
             chat_id_int = int(chat_id)
-            link = await bot.create_chat_invite_link(chat_id_int)
+
+            # Получаем объект чата → у него есть .title
+            chat = await bot.get_chat(chat_id_int)
+            chat_title = chat.title or f"Чат {chat_id}"
+
+            # Создаем ссылку (без expire_date, тк иначе ошибка)
+            link = await bot.create_chat_invite_link(
+                chat_id_int,
+                member_limit=1   # одноразовая (но не одно-вступление!)
+            )
 
             kb.button(
-                text=f"Чат {chat_id}",
+                text=chat_title,
                 url=link.invite_link
             )
 
