@@ -104,7 +104,7 @@ async def auto_update_loop(bot: Bot, stop_event: asyncio.Event, interval: float 
             break
 
         except Exception:
-            logger.error("Ошибка в auto_update_loop:\n%s", traceback.format_exc())
+            logger.error(f"Ошибка в auto_update_loop:\n{traceback.format_exc()}")
             await asyncio.sleep(1)
 
     logger.info("✔ auto_update_loop завершён")
