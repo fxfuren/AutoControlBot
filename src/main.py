@@ -1,50 +1,47 @@
 import asyncio
-import aiohttp
-from aiogram.exceptions import TelegramNetworkError
-from aiogram.client.session.aiohttp import AiohttpSession
+import signal
+from contextlib import suppress
 
 from bot import bot, dp
-from utils.logger import logger
-from services.updater import auto_update_loop, load_cache
 from handlers.start import router as start_router
+from services.bot_runner import BotLifecycleManager
+from services.updater import auto_update_loop, load_cache
+from utils.logger import logger
 
 
-async def start_bot():
-    """
-    Отдельная функция запуска polling — безопасная и самовосстанавливающаяся.
-    """
-    while True:
-        try:
-            logger.warning("▶ Запускаю polling...")
-
-            # свежая сессия (исключает подвисание aiohttp)
-            session = AiohttpSession()
-            bot.session = session
-
-            await dp.start_polling(bot)
-
-        except (TelegramNetworkError, aiohttp.ClientConnectorError) as e:
-            logger.error(f"⚠ Потеря связи с Telegram API: {e}. Переподключение через 5 сек...")
-            await asyncio.sleep(5)
-
-        except Exception as e:
-            logger.error(f"❌ Ошибка polling: {e}. Перезапуск через 5 сек...")
-            await asyncio.sleep(5)
-
-
-async def main():
+async def main() -> None:
     logger.info("🚀 Запуск бота")
 
     load_cache()
-
-    # роутер подключаем ОДИН раз
     dp.include_router(start_router)
 
-    # запускаем автообновление таблицы
-    asyncio.create_task(auto_update_loop())
+    stop_event = asyncio.Event()
+    lifecycle = BotLifecycleManager(bot, dp)
+    updater_task = asyncio.create_task(auto_update_loop(bot, stop_event))
 
-    # запускаем polling с авто-перезапуском
-    await start_bot()
+    loop = asyncio.get_running_loop()
+
+    def _shutdown() -> None:
+        logger.info("🛑 Получен сигнал на остановку")
+        lifecycle.stop()
+        stop_event.set()
+
+    for signame in (signal.SIGINT, signal.SIGTERM):
+        with suppress(NotImplementedError):
+            loop.add_signal_handler(signame, _shutdown)
+
+    try:
+        await lifecycle.run()
+    finally:
+        stop_event.set()
+        lifecycle.stop()
+        updater_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await updater_task
+
+        with suppress(Exception):
+            if bot.session:
+                await bot.session.close()
 
 
 if __name__ == "__main__":

@@ -1,11 +1,13 @@
 import asyncio
 import json
 import traceback
+
+from aiogram import Bot
+
 from utils.logger import logger
 from services.gsheets import load_table, sheet_changed
 from storage.cache import cache
-from services.notifier import detect_changes, notify_user
-from bot import bot
+from services.notifier import NotificationService, detect_changes
 
 CACHE_PATH = "src/storage/cache.json"
 
@@ -25,10 +27,11 @@ def load_cache():
         pass
 
 
-async def auto_update_loop():
+async def auto_update_loop(bot: Bot, stop_event: asyncio.Event, interval: float = 2.0) -> None:
     logger.info("▶ Запускаю автообновление таблицы...")
+    notifier = NotificationService(bot)
 
-    while True:
+    while not stop_event.is_set():
         try:
             if sheet_changed():
                 logger.info("🔄 Таблица изменилась — обновляю кэш")
@@ -38,18 +41,24 @@ async def auto_update_loop():
                 data = load_table()
                 save_cache(data)
 
-                # обновляем память
                 cache.clear()
                 cache.update({str(row["tg_id"]): row for row in data})
 
-                # ищем изменения
                 events = detect_changes(old_data, cache)
 
-                # отправляем уведомления
                 for event in events:
-                    asyncio.create_task(notify_user(bot, event))
+                    asyncio.create_task(notifier.notify(event))
 
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.error("Ошибка автообновления:\n" + traceback.format_exc())
 
-        await asyncio.sleep(2)  # комфортный интервал
+        await _sleep_with_stop(stop_event, interval)
+
+
+async def _sleep_with_stop(stop_event: asyncio.Event, timeout: float) -> None:
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        pass

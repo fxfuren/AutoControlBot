@@ -8,6 +8,7 @@ __pycache__/
 
 # Distribution / packaging
 cache.json
+invite_links.json
 .Python
 build/
 develop-eggs/
