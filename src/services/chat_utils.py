@@ -21,7 +21,9 @@ async def get_chat(bot: Bot, chat_id: int) -> Optional[types.Chat]:
     try:
         return await bot.get_chat(chat_id)
     except TelegramAPIError as exc:
-        logger.error("[chat_utils] Не удалось получить чат %s: %s", chat_id, exc)
+        logger.error(
+            f"[chat_utils] Не удалось получить чат {chat_id}: {exc}"
+        )
         return None
 
 
@@ -58,9 +60,7 @@ async def ensure_invite_link(
         invite = await bot.create_chat_invite_link(chat_id)
     except TelegramAPIError as exc:
         logger.error(
-            "[chat_utils] Не удалось создать ссылку-приглашение для чата %s: %s",
-            chat_id,
-            exc,
+            f"[chat_utils] Не удалось создать ссылку-приглашение для чата {chat_id}: {exc}"
         )
         return None
 

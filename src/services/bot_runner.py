@@ -51,17 +51,15 @@ class BotLifecycleManager:
 
             except (TelegramNetworkError, aiohttp.ClientConnectorError) as exc:
                 logger.error(
-                    "⚠ Потеря связи с Telegram API: %s. "
-                    "Переподключение через %.1f сек...",
-                    exc, self._reconnect_delay,
+                    f"⚠ Потеря связи с Telegram API: {exc}. "
+                    f"Переподключение через {self._reconnect_delay:.1f} сек..."
                 )
                 await self._wait_with_stop()
 
             except Exception as exc:
                 logger.error(
-                    "❌ Ошибка polling: %s. "
-                    "Перезапуск через %.1f сек...",
-                    exc, self._reconnect_delay,
+                    f"❌ Ошибка polling: {exc}. "
+                    f"Перезапуск через {self._reconnect_delay:.1f} сек..."
                 )
                 await self._wait_with_stop()
 

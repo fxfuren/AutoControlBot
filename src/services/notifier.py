@@ -79,7 +79,9 @@ class NotificationBuilder:
             for chat_id in event.new_chats:
                 invite = await _invite(chat_id)
                 if not invite:
-                    logger.warning("[notifier] Нет приглашения в чат %s", chat_id)
+                    logger.warning(
+                        f"[notifier] Нет приглашения в чат {chat_id}"
+                    )
                     continue
 
                 title = await _title(chat_id)
@@ -134,8 +136,7 @@ class NotificationService:
             )
         except Exception as exc:
             logger.error(
-                "[notifier] Ошибка при отправке уведомления %s: %s",
-                event.tg_id, exc
+                f"[notifier] Ошибка при отправке уведомления {event.tg_id}: {exc}"
             )
             return
 
@@ -225,7 +226,7 @@ def _extract_tg_id(record: Mapping[str, Any] | None) -> Optional[int]:
     try:
         return int(record.get("tg_id"))
     except (TypeError, ValueError):
-        logger.warning("[notifier] Некорректный tg_id: %s", record)
+        logger.warning(f"[notifier] Некорректный tg_id: {record}")
         return None
 
 
