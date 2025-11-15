@@ -140,7 +140,9 @@ def load_table() -> list[dict[str, Any]]:
         try:
             data.append(normalize_user_record(record))
         except UserDataError as exc:
-            logger.warning("Пропускаю строку с tg_id=%s: %s", record.get("tg_id"), exc)
+            logger.warning(
+                f"Пропускаю строку с tg_id={record.get('tg_id')}: {exc}"
+            )
             continue
 
     logger.info(f"✔ Загружено {len(data)} строк")

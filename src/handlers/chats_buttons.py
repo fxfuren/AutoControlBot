@@ -14,12 +14,16 @@ async def chats_keyboard(bot: Bot, user_id: int, chats: list[int]):
 
         chat = await get_chat(bot, chat_id)
         if not chat:
-            logger.warning("[buttons] Не удалось получить информацию о чате %s", chat_id)
+            logger.warning(
+                f"[buttons] Не удалось получить информацию о чате {chat_id}"
+            )
             continue
 
         link = await ensure_invite_link(bot, chat_id, chat)
         if not link:
-            logger.warning("[buttons] Не удалось получить ссылку-приглашение для чата %s", chat_id)
+            logger.warning(
+                f"[buttons] Не удалось получить ссылку-приглашение для чата {chat_id}"
+            )
             continue
 
         title = chat.title or f"Чат {chat_id}"
