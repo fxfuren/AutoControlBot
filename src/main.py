@@ -3,6 +3,7 @@ import signal
 from contextlib import suppress
 
 from bot import bot, dp
+from handlers.chat_member_guard import router as chat_guard_router
 from handlers.start import router as start_router
 from services.bot_runner import BotLifecycleManager
 from services.container import init_services
@@ -14,6 +15,7 @@ async def main() -> None:
 
     services = init_services(bot)
     services.cache.load_from_disk()
+    dp.include_router(chat_guard_router)
     dp.include_router(start_router)
 
     stop_event = asyncio.Event()

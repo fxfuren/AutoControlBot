@@ -79,5 +79,21 @@ class CacheRepository:
                 continue
         return result
 
+    def user_has_access(self, tg_id: int, chat_id: int) -> bool:
+        """Проверяет, есть ли у пользователя доступ к указанному чату."""
+        return chat_id in self.list_user_chats(tg_id)
+
+    def chat_is_managed(self, chat_id: int) -> bool:
+        """Проверяет, упоминается ли чат в таблице доступов."""
+        for user in self._data.values():
+            chats = user.get("chats") or []
+            for raw_chat_id in chats:
+                try:
+                    if int(raw_chat_id) == chat_id:
+                        return True
+                except (TypeError, ValueError):
+                    continue
+        return False
+
     def as_mapping(self) -> Mapping[str, Mapping[str, Any]]:
         return self._data

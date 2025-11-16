@@ -30,6 +30,14 @@ class AccessService:
     def list_chat_ids(self, tg_id: int) -> list[int]:
         return self._cache.list_user_chats(tg_id)
 
+    def user_has_access_to_chat(self, tg_id: int, chat_id: int) -> bool:
+        """Возвращает True, если пользователь имеет доступ к указанному чату."""
+        return self._cache.user_has_access(tg_id, chat_id)
+
+    def is_managed_chat(self, chat_id: int) -> bool:
+        """Проверяет, присутствует ли чат в таблице доступов."""
+        return self._cache.chat_is_managed(chat_id)
+
     async def resolve_chat_access(self, bot: Bot, tg_id: int) -> List[ChatAccess]:
         """Возвращает список чатов с готовыми инвайтами для пользователя."""
         result: List[ChatAccess] = []

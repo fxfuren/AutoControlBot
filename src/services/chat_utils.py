@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Optional
 
 from aiogram import Bot, types
@@ -65,3 +66,19 @@ async def ensure_invite_link(
         return None
 
     return invite.invite_link
+
+
+async def kick_user_from_chat(bot: Bot, chat_id: int, user_id: int) -> bool:
+    """Исключает пользователя из чата без перманентного бана."""
+    try:
+        await bot.ban_chat_member(chat_id, user_id, until_date=0)
+    except TelegramAPIError as exc:
+        logger.error(
+            f"[chat_utils] Не удалось исключить пользователя {user_id} из чата {chat_id}: {exc}"
+        )
+        return False
+
+    with suppress(TelegramAPIError):
+        await bot.unban_chat_member(chat_id, user_id)
+
+    return True

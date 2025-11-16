@@ -8,7 +8,7 @@ from typing import Any, Iterable, List, Mapping, Optional
 
 from aiogram import Bot, types
 
-from services.chat_utils import ensure_invite_link, get_chat
+from services.chat_utils import ensure_invite_link, get_chat, kick_user_from_chat
 from services.user_data import parse_chat_ids
 from utils.logger import logger
 
@@ -98,7 +98,7 @@ class NotificationBuilder:
                 lines.append(f"• {name}")
 
                 # Исключаем пользователя из чата
-                await _kick_from_chat(bot, event.tg_id, chat_id)
+                await kick_user_from_chat(bot, chat_id, event.tg_id)
 
         return "\n".join(lines) if len(lines) > 1 else None
 
@@ -254,15 +254,3 @@ def _chat_ids(record: Mapping[str, Any] | None) -> set[int]:
             pass
 
     return set(parse_chat_ids(chats))
-
-
-async def _kick_from_chat(bot: Bot, user_id: int, chat_id: int) -> None:
-    """Исключает пользователя из чата (кик с разбаном)."""
-    try:
-        await bot.ban_chat_member(chat_id, user_id, until_date=0)
-    except Exception as exc:
-        logger.error(f"[notifier] Не удалось исключить {user_id} из {chat_id}: {exc}")
-        return
-
-    with suppress(Exception):
-        await bot.unban_chat_member(chat_id, user_id)
