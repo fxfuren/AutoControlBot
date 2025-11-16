@@ -46,19 +46,100 @@ def _get_service():
     return build("sheets", "v4", credentials=creds)
 
 
-def load_raw_values() -> list[list[str]]:
-    """Получение данных через batchGet (в 6 раз быстрее)."""
+def load_raw_values(sheet_name: str) -> list[list[str]]:
+    """Загружает указанный лист полностью (все колонки A:Z)."""
     service = _get_service()
     spreadsheet_id = _get_spreadsheet_id()
 
     result = service.spreadsheets().values().batchGet(
         spreadsheetId=spreadsheet_id,
-        ranges=["Лист1!A2:E"]
+        ranges=[f"{sheet_name}!A1:Z9999"]
     ).execute()
 
-    values = result.get("valueRanges", [])[0].get("values", [])
-    return values
+    return result["valueRanges"][0].get("values", [])
 
+
+# ===========================
+#        ВАЛИДАЦИЯ
+# ===========================
+
+def validate_table(access_raw: list[list[str]], mapping_raw: list[list[str]]):
+    """
+    Проверяет корректность структуры таблицы:
+    - обязательные поля
+    - корректные tg_id
+    - отсутствие дубликатов
+    - соответствие названий чатов
+    """
+    logger.info("🔍 Проверяю таблицу...")
+
+    if not access_raw:
+        raise RuntimeError("Лист 'Доступы' пуст")
+
+    if not mapping_raw:
+        raise RuntimeError("Лист 'Чаты' пуст")
+
+    headers = access_raw[0]
+
+    required_cols = {"tg_id", "username", "fio"}
+    missing = required_cols - set(headers)
+    if missing:
+        raise RuntimeError(f"В листе 'Доступы' отсутствуют обязательные колонки: {missing}")
+
+    chat_columns = [h for h in headers if h not in required_cols]
+    if not chat_columns:
+        raise RuntimeError("В листе 'Доступы' нет колонок чатов")
+
+    # Проверяем лист “Чаты”
+    chat_name_to_id = {}
+    for row in mapping_raw[1:]:
+        if len(row) < 2:
+            raise RuntimeError("Лист 'Чаты' содержит строки без chat_name или chat_id")
+
+        chat_name = row[0].strip()
+        chat_id = row[1].strip()
+
+        if not chat_name:
+            raise RuntimeError("Лист 'Чаты': пустое название чата")
+
+        if chat_name in chat_name_to_id:
+            raise RuntimeError(f"Дублируется название чата в листе 'Чаты': {chat_name}")
+
+        if not chat_id.startswith("-100"):
+            logger.warning(f"⚠️ Возможно некорректный chat_id '{chat_id}' для чата '{chat_name}'")
+
+        chat_name_to_id[chat_name] = chat_id
+
+    # Проверяем соответствие заголовков чатов
+    for col in chat_columns:
+        if col not in chat_name_to_id:
+            raise RuntimeError(f"Колонка '{col}' есть в 'Доступы', "
+                               f"но отсутствует в листе 'Чаты'")
+
+    # Проверяем tg_id + дубликаты
+    seen = set()
+    for row in access_raw[1:]:
+        if not row:
+            continue
+        tg = row[0].strip()
+
+        if not tg:
+            continue
+
+        if not tg.isdigit():
+            raise RuntimeError(f"Некорректный tg_id: '{tg}'")
+
+        if tg in seen:
+            raise RuntimeError(f"Дублирующийся tg_id: {tg}")
+
+        seen.add(tg)
+
+    logger.info("✔ Валидация успешно пройдена")
+
+
+# ===========================
+#      ОПРЕДЕЛЕНИЕ ИЗМЕНЕНИЙ
+# ===========================
 
 def sheet_changed():
     """
@@ -68,7 +149,6 @@ def sheet_changed():
     """
     global last_modified, last_hash, last_hash_time
 
-    # ---------------------- Проверяем modifiedTime ----------------------
     service = _get_service()
     spreadsheet_id = _get_spreadsheet_id()
 
@@ -92,19 +172,17 @@ def sheet_changed():
         return False
 
     except HttpError:
-        pass  # если нет modifiedTime → берём fallback
+        pass
 
-    # ---------------------- Fallback: debounce + hash ----------------------
     import time
     now = time.time()
 
-    # Fallback check раз в 10 секунд — debounce
     if now - last_hash_time < 10:
         return False
 
     last_hash_time = now
 
-    rows = load_raw_values()
+    rows = load_raw_values("Доступы")
     new_hash = hashlib.md5(json.dumps(rows, sort_keys=True).encode()).hexdigest()
 
     if last_hash is None:
@@ -118,32 +196,60 @@ def sheet_changed():
     return False
 
 
+# ===========================
+#      ЗАГРУЗКА ТАБЛИЦЫ
+# ===========================
+
 def load_table() -> list[dict[str, Any]]:
-    """Формируем таблицу в структурированный формат."""
     logger.info("📄 Загружаю Google Sheet...")
 
-    rows = load_raw_values()
+    access_raw = load_raw_values("Доступы")
+    mapping_raw = load_raw_values("Чаты")
+
+    # ---- ВАЛИДАЦИЯ ----
+    validate_table(access_raw, mapping_raw)
+
+    headers = access_raw[0]
+    rows = access_raw[1:]
+
+    # Собираем соответствие чатов
+    chat_name_to_id = {
+        row[0].strip(): row[1].strip()
+        for row in mapping_raw[1:]
+        if len(row) >= 2 and row[0].strip()
+    }
+
     data = []
 
     for row in rows:
         if not row or not row[0].strip():
             continue
 
+        row_dict = dict(zip(headers, row))
+
+        tg_id = row_dict.get("tg_id", "").strip()
+        if not tg_id:
+            continue
+
+        # доступные чаты
+        user_chats = []
+        for col_name, value in row_dict.items():
+            if col_name in ("tg_id", "username", "fio"):
+                continue
+            if value.strip() == "+":
+                user_chats.append(chat_name_to_id[col_name])
+
         record = {
-            "tg_id": row[0],
-            "username": row[1] if len(row) > 1 else "",
-            "fio": row[2] if len(row) > 2 else "",
-            "role": row[3] if len(row) > 3 else "",
-            "chats": row[4] if len(row) > 4 else "",
+            "tg_id": tg_id,
+            "username": row_dict.get("username", ""),
+            "fio": row_dict.get("fio", ""),
+            "chats": user_chats,
         }
 
         try:
             data.append(normalize_user_record(record))
         except UserDataError as exc:
-            logger.warning(
-                f"Пропускаю строку с tg_id={record.get('tg_id')}: {exc}"
-            )
-            continue
+            logger.warning("Пропускаю строку tg_id=%s: %s", tg_id, exc)
 
     logger.info(f"✔ Загружено {len(data)} строк")
     return data
