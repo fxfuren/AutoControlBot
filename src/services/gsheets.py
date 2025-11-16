@@ -64,13 +64,6 @@ def load_raw_values(sheet_name: str) -> list[list[str]]:
 # ===========================
 
 def validate_table(access_raw: list[list[str]], mapping_raw: list[list[str]]):
-    """
-    Проверяет корректность структуры таблицы:
-    - обязательные поля
-    - корректные tg_id
-    - отсутствие дубликатов
-    - соответствие названий чатов
-    """
     logger.info("🔍 Проверяю таблицу...")
 
     if not access_raw:
@@ -90,41 +83,57 @@ def validate_table(access_raw: list[list[str]], mapping_raw: list[list[str]]):
     if not chat_columns:
         raise RuntimeError("В листе 'Доступы' нет колонок чатов")
 
-    # Проверяем лист “Чаты”
-    chat_name_to_id = {}
-    for row in mapping_raw[1:]:
-        if len(row) < 2:
-            raise RuntimeError("Лист 'Чаты' содержит строки без chat_name или chat_id")
+    # ────────────────────────
+    #  ВАЛИДАЦИЯ ЛИСТА "ЧАТЫ"
+    # ────────────────────────
 
-        chat_name = row[0].strip()
-        chat_id = row[1].strip()
+    chat_name_to_id = {}
+
+    for row in mapping_raw[1:]:
+        # Пустая строка → пропускаем
+        if not row or all(not cell.strip() for cell in row):
+            continue
+
+        chat_name = row[0].strip() if len(row) >= 1 else ""
+        chat_id = row[1].strip() if len(row) >= 2 else ""
 
         if not chat_name:
-            raise RuntimeError("Лист 'Чаты': пустое название чата")
+            logger.warning("⚠️ Пропускаю строку в 'Чаты': пустое название чата")
+            continue
 
         if chat_name in chat_name_to_id:
             raise RuntimeError(f"Дублируется название чата в листе 'Чаты': {chat_name}")
+
+        if not chat_id:
+            logger.warning(f"⚠️ Чат '{chat_name}' не имеет chat_id — пропускаю")
+            continue  # важно: просто пропускаем
 
         if not chat_id.startswith("-100"):
             logger.warning(f"⚠️ Возможно некорректный chat_id '{chat_id}' для чата '{chat_name}'")
 
         chat_name_to_id[chat_name] = chat_id
 
+    if not chat_name_to_id:
+        raise RuntimeError("В листе 'Чаты' нет ни одного корректного чата")
+
     # Проверяем соответствие заголовков чатов
     for col in chat_columns:
         if col not in chat_name_to_id:
-            raise RuntimeError(f"Колонка '{col}' есть в 'Доступы', "
-                               f"но отсутствует в листе 'Чаты'")
+            logger.warning(
+                f"⚠️ Колонка '{col}' есть в 'Доступы', "
+                f"но отсутствует в листе 'Чаты' — пользователи не получат этот чат"
+            )
 
-    # Проверяем tg_id + дубликаты
+    # ────────────────────────
+    #  ПРОВЕРКА tg_id
+    # ────────────────────────
+
     seen = set()
     for row in access_raw[1:]:
-        if not row:
+        if not row or not row[0].strip():
             continue
-        tg = row[0].strip()
 
-        if not tg:
-            continue
+        tg = row[0].strip()
 
         if not tg.isdigit():
             raise RuntimeError(f"Некорректный tg_id: '{tg}'")
@@ -237,7 +246,16 @@ def load_table() -> list[dict[str, Any]]:
             if col_name in ("tg_id", "username", "fio"):
                 continue
             if value.strip() == "+":
-                user_chats.append(chat_name_to_id[col_name])
+                chat_id = chat_name_to_id.get(col_name)
+                if chat_id:
+                    user_chats.append(chat_id)
+                else:
+                    logger.warning(
+                        f"⚠️ В таблице 'Доступы' указано '+', "
+                        f"но чат '{col_name}' отсутствует в листе 'Чаты' – пропускаю"
+            )
+
+
 
         record = {
             "tg_id": tg_id,

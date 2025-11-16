@@ -1,8 +1,10 @@
 from contextlib import suppress
-from aiogram import Router, types, Bot
+
+from aiogram import Bot, Router, types
 from aiogram.filters import Command
-from services.roles import get_user_by_tg_id, get_user_chats
+
 from handlers.chats_buttons import chats_keyboard
+from services.container import get_container
 
 router = Router()
 
@@ -15,7 +17,10 @@ async def start_handler(message: types.Message, bot: Bot):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    user = get_user_by_tg_id(user_id)
+    services = get_container()
+    access_service = services.access
+
+    user = access_service.get_user(user_id)
 
     if not user:
         await message.answer("❌ У вас нет доступа.")
@@ -33,12 +38,10 @@ async def start_handler(message: types.Message, bot: Bot):
 
     _user_start_commands[user_id] = message.message_id
 
-    chats = get_user_chats(user_id)
-    keyboard = await chats_keyboard(bot, user_id, chats)
+    chat_links = await access_service.resolve_chat_access(bot, user_id)
+    keyboard = chats_keyboard(chat_links)
 
-    response = await message.answer(
-        f"Вот ваши доступные чаты:",
-        reply_markup=keyboard
-    )
+    text = "Вот ваши доступные чаты:" if chat_links else "🔐 У вас пока нет доступных чатов"
+    response = await message.answer(text, reply_markup=keyboard)
 
     _start_messages[user_id] = response.message_id

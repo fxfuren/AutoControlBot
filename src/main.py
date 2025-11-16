@@ -5,19 +5,20 @@ from contextlib import suppress
 from bot import bot, dp
 from handlers.start import router as start_router
 from services.bot_runner import BotLifecycleManager
-from services.updater import auto_update_loop, load_cache
+from services.container import init_services
 from utils.logger import logger
 
 
 async def main() -> None:
     logger.info("🚀 Запуск бота")
 
-    load_cache()
+    services = init_services(bot)
+    services.cache.load_from_disk()
     dp.include_router(start_router)
 
     stop_event = asyncio.Event()
     lifecycle = BotLifecycleManager(bot, dp)
-    updater_task = asyncio.create_task(auto_update_loop(bot, stop_event))
+    updater_task = asyncio.create_task(services.sync_worker.run(stop_event))
 
     loop = asyncio.get_running_loop()
 
@@ -42,7 +43,6 @@ async def main() -> None:
         with suppress(Exception):
             if bot.session:
                 await bot.session.close()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

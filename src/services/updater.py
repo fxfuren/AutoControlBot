@@ -1,110 +1,57 @@
+from __future__ import annotations
+
 import asyncio
-import json
 import traceback
-from pathlib import Path
 
-from aiogram import Bot
-
-from utils.logger import logger
 from services.gsheets import load_table, sheet_changed
-from storage.cache import cache
 from services.notifier import NotificationService, detect_changes
-
-CACHE_PATH = Path(__file__).resolve().parent / "../storage/cache.json"
-
-
-def save_cache(data) -> None:
-    """
-    Сохраняет текущий кэш в файл.
-
-    Формат:
-        [
-            {"tg_id": "...", "fio": "...", "role": "...", "chats": [...]},
-            ...
-        ]
-
-    Файл используется при следующем запуске, чтобы бот имел актуальные данные,
-    даже если таблица недоступна.
-    """
-    path = CACHE_PATH.resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+from storage.cache import CacheRepository
+from utils.logger import logger
 
 
-def load_cache():
-    """
-    Загружает данные из файла кэша при старте бота.
+class SheetSyncWorker:
+    """Event-driven воркер синхронизации Google Sheets и локального кэша."""
 
-    Если файл отсутствует или повреждён — кэш не загружается.
-    В этом случае он будет обновлён автоматически при следующем изменении таблицы.
-    """
-    try:
-        with CACHE_PATH.resolve().open("r", encoding="utf-8") as f:
-            data = json.load(f)
+    def __init__(
+        self,
+        cache: CacheRepository,
+        notifier: NotificationService,
+        *,
+        interval: float = 2.0,
+    ) -> None:
+        self._cache = cache
+        self._notifier = notifier
+        self._interval = interval
 
-    except FileNotFoundError:
-        logger.info("Кэш не найден — будет создан после первой загрузки таблицы")
-        return
+    async def run(self, stop_event: asyncio.Event) -> None:
+        logger.info("▶ Запускаю воркер синхронизации таблицы")
 
-    except json.JSONDecodeError as exc:
-        logger.error(f"Некорректный JSON в файле кэша: {exc}")
-        return
+        while not stop_event.is_set():
+            try:
+                if sheet_changed():
+                    await self._handle_sheet_update()
 
-    if not isinstance(data, list):
-        logger.error("Некорректный формат кэша: ожидался список записей пользователей")
-        return
+                await asyncio.wait_for(stop_event.wait(), timeout=self._interval)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                logger.info("⏹ Воркер синхронизации отменён")
+                break
+            except Exception:
+                logger.error("Ошибка в SheetSyncWorker:\n{}", traceback.format_exc())
+                await asyncio.sleep(1)
 
-    cache.clear()
-    for row in data:
-        if isinstance(row, dict) and "tg_id" in row:
-            cache[str(row["tg_id"])] = row
+        logger.info("✔ Воркер синхронизации остановлен")
 
+    async def _handle_sheet_update(self) -> None:
+        logger.info("🔄 Обнаружены изменения в таблице — обновляю кэш")
+        old_snapshot = self._cache.snapshot()
+        new_rows = load_table()
+        self._cache.replace(new_rows)
+        self._cache.save_snapshot()
+        self._publish_events(old_snapshot)
 
-async def auto_update_loop(bot: Bot, stop_event: asyncio.Event, interval: float = 2.0) -> None:
-    """
-    Основной фоновый цикл синхронизации с Google Sheets.
-
-    Цикл выполняет следующие действия:
-      1. Проверяет, изменилась ли таблица (sheet_changed()).
-      2. При обнаружении изменений:
-         - Загружает новую версию таблицы.
-         - Обновляет локальный кэш.
-         - Сохраняет кэш на диск.
-         - Определяет изменения прав / ролей / чатов (detect_changes).
-         - Отправляет соответствующие уведомления пользователям.
-      3. Повторяет процесс каждые interval секунд.
-
-    Цикл корректно завершается при установке stop_event.
-    """
-    logger.info("▶ Запускаю автообновление таблицы...")
-    notifier = NotificationService(bot)
-
-    while not stop_event.is_set():
-        try:
-            if sheet_changed():
-                logger.info("🔄 Таблица изменилась — обновляю кэш")
-                old_data = cache.copy()
-                new_data_raw = load_table()
-                save_cache(new_data_raw)
-                cache.clear()
-                cache.update({str(row["tg_id"]): row for row in new_data_raw})
-                events = detect_changes(old_data, cache)
-                for event in events:
-                    asyncio.create_task(notifier.notify(event))
-
-            await asyncio.wait_for(stop_event.wait(), timeout=interval)
-
-        except asyncio.TimeoutError:
-            continue
-
-        except asyncio.CancelledError:
-            logger.info("⏹ Остановка автообновления")
-            break
-
-        except Exception:
-            logger.error(f"Ошибка в auto_update_loop:\n{traceback.format_exc()}")
-            await asyncio.sleep(1)
-
-    logger.info("✔ auto_update_loop завершён")
+    def _publish_events(self, old_data: dict[str, dict[str, object]]) -> None:
+        events = detect_changes(old_data, self._cache.as_mapping())
+        for event in events:
+            asyncio.create_task(self._notifier.notify(event))
