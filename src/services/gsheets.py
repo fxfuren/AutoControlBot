@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from google.auth.exceptions import RefreshError
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -46,15 +47,29 @@ def _get_service():
     return build("sheets", "v4", credentials=creds)
 
 
+def _raise_refresh_error(exc: RefreshError) -> None:
+    logger.error(
+        "Ошибка авторизации Google API: %s. Проверьте файл сервисного аккаунта по пути %s",
+        exc,
+        GOOGLE_CREDS_PATH,
+    )
+    raise RuntimeError(
+        "Не удалось авторизоваться в Google API. Убедитесь, что GOOGLE_CREDS_PATH указывает на корректный JSON сервисного аккаунта."
+    ) from exc
+
+
 def load_raw_values(sheet_name: str) -> list[list[str]]:
     """Загружает указанный лист полностью (все колонки A:Z)."""
     service = _get_service()
     spreadsheet_id = _get_spreadsheet_id()
 
-    result = service.spreadsheets().values().batchGet(
-        spreadsheetId=spreadsheet_id,
-        ranges=[f"{sheet_name}!A1:Z9999"]
-    ).execute()
+    try:
+        result = service.spreadsheets().values().batchGet(
+            spreadsheetId=spreadsheet_id,
+            ranges=[f"{sheet_name}!A1:Z9999"]
+        ).execute()
+    except RefreshError as exc:
+        _raise_refresh_error(exc)
 
     return result["valueRanges"][0].get("values", [])
 
@@ -180,6 +195,8 @@ def sheet_changed():
 
         return False
 
+    except RefreshError as exc:
+        _raise_refresh_error(exc)
     except HttpError:
         pass
 
