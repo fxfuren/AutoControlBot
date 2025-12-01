@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import traceback
 
+from typing import Mapping
+
 from services.gsheets import load_table, sheet_changed
 from services.notifier import NotificationService, detect_changes
 from storage.cache import CacheRepository
@@ -45,13 +47,15 @@ class SheetSyncWorker:
 
     async def _handle_sheet_update(self) -> None:
         logger.info("🔄 Обнаружены изменения в таблице — обновляю кэш")
-        old_snapshot = self._cache.snapshot()
+        old_data = self._cache.as_mapping()
         new_rows = load_table()
         self._cache.replace(new_rows)
         self._cache.save_snapshot()
-        await self._publish_events(old_snapshot)
+        await self._publish_events(old_data)
 
-    async def _publish_events(self, old_data: dict[str, dict[str, object]]) -> None:
+    async def _publish_events(
+        self, old_data: Mapping[str, Mapping[str, object]]
+    ) -> None:
         events = detect_changes(old_data, self._cache.as_mapping())
         for event in events:
             await self._notifier.notify(event)

@@ -96,4 +96,6 @@ class CacheRepository:
         return False
 
     def as_mapping(self) -> Mapping[str, Mapping[str, Any]]:
+        """Возвращает текущее состояние без копирования."""
+
         return self._data
