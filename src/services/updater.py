@@ -49,9 +49,9 @@ class SheetSyncWorker:
         new_rows = load_table()
         self._cache.replace(new_rows)
         self._cache.save_snapshot()
-        self._publish_events(old_snapshot)
+        await self._publish_events(old_snapshot)
 
-    def _publish_events(self, old_data: dict[str, dict[str, object]]) -> None:
+    async def _publish_events(self, old_data: dict[str, dict[str, object]]) -> None:
         events = detect_changes(old_data, self._cache.as_mapping())
         for event in events:
-            asyncio.create_task(self._notifier.notify(event))
+            await self._notifier.notify(event)
