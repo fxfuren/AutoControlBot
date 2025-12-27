@@ -68,7 +68,7 @@ def _get_service():
                 if hasattr(_service_cache["service"], "_http"):
                     _service_cache["service"]._http.close()
                 logger.info(
-                    "♻️ Пересоздан Google API service (TTL: %d минут)",
+                    "🔄 Закрываю старый Google API service (TTL истёк: %d минут)",
                     GOOGLE_SERVICE_TTL_MINUTES
                 )
             except Exception as exc:
