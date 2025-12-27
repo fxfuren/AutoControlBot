@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from contextlib import suppress
 
 from aiogram import Bot, Router, types
@@ -8,8 +9,16 @@ from services.container import get_container
 
 router = Router()
 
-_start_messages = {}
-_user_start_commands = {}
+# LRU-like dictionaries with size limit to prevent unbounded memory growth
+_MAX_CACHE_SIZE = 1000
+_start_messages = OrderedDict()
+_user_start_commands = OrderedDict()
+
+
+def _limit_dict_size(d: OrderedDict, max_size: int = _MAX_CACHE_SIZE) -> None:
+    """Remove oldest entries if dictionary exceeds max_size."""
+    while len(d) > max_size:
+        d.popitem(last=False)
 
 
 @router.message(Command("start"))
@@ -37,6 +46,7 @@ async def start_handler(message: types.Message, bot: Bot):
             await bot.delete_message(chat_id=chat_id, message_id=old_bot_msg)
 
     _user_start_commands[user_id] = message.message_id
+    _limit_dict_size(_user_start_commands)
 
     chat_links = await access_service.resolve_chat_access(bot, user_id)
     keyboard = chats_keyboard(chat_links)
@@ -45,3 +55,4 @@ async def start_handler(message: types.Message, bot: Bot):
     response = await message.answer(text, reply_markup=keyboard)
 
     _start_messages[user_id] = response.message_id
+    _limit_dict_size(_start_messages)

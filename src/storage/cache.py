@@ -60,11 +60,17 @@ class CacheRepository:
 
     def snapshot(self) -> Dict[str, Dict[str, Any]]:
         """Возвращает копию текущего состояния для анализа изменений."""
+        # deepcopy необходим здесь для корректного сравнения изменений
         return deepcopy(self._data)
 
     def get_user(self, tg_id: int) -> Dict[str, Any] | None:
-        user = self._data.get(str(tg_id))
-        return deepcopy(user) if user else None
+        """
+        Возвращает данные пользователя без копирования.
+        
+        ВАЖНО: Не модифицируйте возвращаемый словарь напрямую!
+        Это read-only данные для чтения информации о пользователе.
+        """
+        return self._data.get(str(tg_id))
 
     def list_user_chats(self, tg_id: int) -> list[int]:
         user = self._data.get(str(tg_id))
