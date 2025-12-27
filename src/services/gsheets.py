@@ -61,7 +61,8 @@ def _get_service():
         or (current_time - _service_cache["created_at"]) > ttl_seconds
     ):
         # Закрываем старую HTTP сессию, если она существует
-        if _service_cache["service"] is not None:
+        old_service_existed = _service_cache["service"] is not None
+        if old_service_existed:
             try:
                 # Закрываем HTTP соединение
                 if hasattr(_service_cache["service"], "_http"):
@@ -84,7 +85,7 @@ def _get_service():
         _service_cache["service"] = build("sheets", "v4", credentials=creds)
         _service_cache["created_at"] = current_time
         
-        if current_time > 0:  # Не первый запуск
+        if old_service_existed:
             logger.info("✔️ Google API service успешно пересоздан")
     
     return _service_cache["service"]
@@ -248,7 +249,6 @@ def sheet_changed():
     except HttpError:
         pass
 
-    import time
     now = time.time()
 
     if now - last_hash_time < 10:
