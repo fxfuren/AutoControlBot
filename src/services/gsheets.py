@@ -85,8 +85,11 @@ def _get_service():
         _service_cache["service"] = build("sheets", "v4", credentials=creds)
         _service_cache["created_at"] = current_time
         
+        # Логируем создание/пересоздание
         if old_service_existed:
             logger.info("✔️ Google API service успешно пересоздан")
+        else:
+            logger.info("✔️ Google API service создан впервые")
     
     return _service_cache["service"]
 
