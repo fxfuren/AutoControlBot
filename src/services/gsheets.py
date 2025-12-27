@@ -321,7 +321,7 @@ def load_table() -> list[dict[str, Any]]:
                     logger.warning(
                         f"⚠️ В таблице 'Доступы' указано '+', "
                         f"но чат '{col_name}' отсутствует в листе 'Чаты' – пропускаю"
-            )
+                    )
 
 
 
