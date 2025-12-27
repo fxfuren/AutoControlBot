@@ -46,23 +46,28 @@ class NotificationBuilder:
         """
 
         lines: List[str] = ["<b>🔔 Обновление доступа</b>"]
-        chat_cache: dict[int, Optional[types.Chat]] = {}
+        # Кешируем только необходимые данные вместо полных объектов Chat
+        chat_cache: dict[int, dict[str, Optional[str]]] = {}
 
-        async def _chat(chat_id: int) -> Optional[types.Chat]:
-            """Ленивая загрузка объекта чата с кешированием."""
+        async def _get_chat_data(chat_id: int) -> dict[str, Optional[str]]:
+            """Ленивая загрузка данных чата с кешированием."""
             if chat_id not in chat_cache:
-                chat_cache[chat_id] = await get_chat(bot, chat_id)
+                chat = await get_chat(bot, chat_id)
+                chat_cache[chat_id] = {
+                    "title": chat.title if chat else None,
+                    "invite": await ensure_invite_link(bot, chat_id, chat)
+                }
             return chat_cache[chat_id]
 
         async def _title(chat_id: int) -> Optional[str]:
             """Имя чата или None."""
-            chat = await _chat(chat_id)
-            return chat.title if chat else None
+            data = await _get_chat_data(chat_id)
+            return data["title"]
 
         async def _invite(chat_id: int) -> Optional[str]:
             """Гарантированно возвращает рабочий инвайт в чат."""
-            chat = await _chat(chat_id)
-            return await ensure_invite_link(bot, chat_id, chat)
+            data = await _get_chat_data(chat_id)
+            return data["invite"]
 
         # ---- 1. Изменение роли ----
         if event.changed_role:
