@@ -1,6 +1,7 @@
 import json
 import hashlib
 import re
+import time
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -11,7 +12,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from config import GOOGLE_CREDS_PATH, GOOGLE_SHEETS_URL
+from config import GOOGLE_CREDS_PATH, GOOGLE_SHEETS_URL, GOOGLE_SERVICE_TTL_MINUTES
 from utils.logger import logger
 from services.user_data import normalize_user_record, UserDataError
 
@@ -20,6 +21,10 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 last_modified: datetime | None = None
 last_hash: str | None = None
 last_hash_time = 0.0      # для debounce хэша
+
+# TTL-based cache for Google API service
+_service_cache = None
+_service_cache_time = 0.0
 
 
 def _require_config(value: str | None, name: str) -> str:
@@ -37,14 +42,45 @@ def _get_spreadsheet_id() -> str:
     return match.group(1)
 
 
-@lru_cache(maxsize=1)
 def _get_service():
-    creds_path = Path(_require_config(GOOGLE_CREDS_PATH, "GOOGLE_CREDS_PATH"))
-    if not creds_path.exists():
-        raise RuntimeError(f"Файл с учетными данными не найден: {creds_path}")
-
-    creds = Credentials.from_service_account_file(str(creds_path), scopes=SCOPES)
-    return build("sheets", "v4", credentials=creds)
+    """
+    Возвращает Google Sheets API service с TTL-кэшированием.
+    Пересоздаёт service объект каждые GOOGLE_SERVICE_TTL_MINUTES минут
+    для предотвращения накопления памяти.
+    """
+    global _service_cache, _service_cache_time
+    
+    now = time.time()
+    ttl_seconds = GOOGLE_SERVICE_TTL_MINUTES * 60
+    
+    # Проверяем, нужно ли пересоздать service
+    if _service_cache is None or (now - _service_cache_time) > ttl_seconds:
+        # Закрываем старый HTTP сессию, если существует
+        if _service_cache is not None:
+            try:
+                if hasattr(_service_cache, '_http') and _service_cache._http is not None:
+                    _service_cache._http.close()
+                logger.info(f"🔄 Пересоздаю Google API service (TTL: {GOOGLE_SERVICE_TTL_MINUTES} мин)")
+            except Exception as exc:
+                logger.warning(f"Не удалось закрыть старую HTTP сессию: {exc}")
+            
+            # Явно удаляем старый объект
+            old_service = _service_cache
+            _service_cache = None
+            del old_service
+            
+            logger.info("✔ Google API service успешно пересоздан")
+        
+        # Создаём новый service
+        creds_path = Path(_require_config(GOOGLE_CREDS_PATH, "GOOGLE_CREDS_PATH"))
+        if not creds_path.exists():
+            raise RuntimeError(f"Файл с учетными данными не найден: {creds_path}")
+        
+        creds = Credentials.from_service_account_file(str(creds_path), scopes=SCOPES)
+        _service_cache = build("sheets", "v4", credentials=creds)
+        _service_cache_time = now
+    
+    return _service_cache
 
 
 def _raise_refresh_error(exc: RefreshError) -> None:
@@ -71,7 +107,12 @@ def load_raw_values(sheet_name: str) -> list[list[str]]:
     except RefreshError as exc:
         _raise_refresh_error(exc)
 
-    return result["valueRanges"][0].get("values", [])
+    values = result["valueRanges"][0].get("values", [])
+    
+    # Явно освобождаем память от большого промежуточного объекта
+    del result
+    
+    return values
 
 
 # ===========================
@@ -244,6 +285,9 @@ def load_table() -> list[dict[str, Any]]:
         for row in mapping_raw[1:]
         if len(row) >= 2 and row[0].strip()
     }
+    
+    # Освобождаем память от больших исходных данных после их обработки
+    del mapping_raw
 
     data = []
 
@@ -285,6 +329,9 @@ def load_table() -> list[dict[str, Any]]:
             data.append(normalize_user_record(record))
         except UserDataError as exc:
             logger.warning("Пропускаю строку tg_id=%s: %s", tg_id, exc)
+
+    # Освобождаем память от больших исходных данных
+    del access_raw
 
     logger.info(f"✔ Загружено {len(data)} строк")
     return data
