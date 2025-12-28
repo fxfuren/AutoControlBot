@@ -38,6 +38,9 @@ _creds_cache: dict[str, Any] = {
     "expiry": None
 }
 
+# Singleton aiohttp ClientSession for connection pooling
+_aiohttp_session: aiohttp.ClientSession | None = None
+
 
 def _require_config(value: str | None, name: str) -> str:
     if not value:
@@ -95,6 +98,20 @@ def _get_creds() -> tuple[Credentials, str]:
         logger.debug("🔑 Обновлён токен доступа для REST API")
     
     return creds, _creds_cache["token"]
+
+
+async def _get_aiohttp_session() -> aiohttp.ClientSession:
+    """
+    Возвращает singleton aiohttp ClientSession для повторного использования соединений.
+    Создаёт новую сессию, если она ещё не существует или была закрыта.
+    """
+    global _aiohttp_session
+    
+    if _aiohttp_session is None or _aiohttp_session.closed:
+        _aiohttp_session = aiohttp.ClientSession()
+        logger.debug("🌐 Создана новая aiohttp ClientSession")
+    
+    return _aiohttp_session
 
 
 def _get_service():
@@ -283,37 +300,39 @@ async def sheet_changed():
     
     # Пытаемся получить modifiedTime через REST API (лёгковесный способ)
     try:
-        _, token = _get_creds()
+        creds, token = _get_creds()
         
         url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}"
         params = {"fields": "properties.modifiedTime"}
         headers = {"Authorization": f"Bearer {token}"}
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    modified = data["properties"]["modifiedTime"]
-                    new_time = datetime.fromisoformat(modified.replace("Z", "+00:00"))
-                    
-                    if last_modified is None:
-                        last_modified = new_time
-                        return True
-                    
-                    if new_time != last_modified:
-                        last_modified = new_time
-                        return True
-                    
-                    return False
-                else:
-                    logger.warning(
-                        "⚠️ Не удалось получить modifiedTime через REST API: %d", 
-                        response.status
-                    )
+        session = await _get_aiohttp_session()
+        async with session.get(url, params=params, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                modified = data["properties"]["modifiedTime"]
+                new_time = datetime.fromisoformat(modified.replace("Z", "+00:00"))
+                
+                if last_modified is None:
+                    last_modified = new_time
+                    return True
+                
+                if new_time != last_modified:
+                    last_modified = new_time
+                    return True
+                
+                return False
+            else:
+                logger.warning(
+                    "⚠️ Не удалось получить modifiedTime через REST API: %d", 
+                    response.status
+                )
     except RefreshError as exc:
         _raise_refresh_error(exc)
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        logger.warning("⚠️ Ошибка соединения при проверке modifiedTime: %s", exc)
     except Exception as exc:
-        logger.warning("⚠️ Ошибка при проверке modifiedTime: %s", exc)
+        logger.warning("⚠️ Неожиданная ошибка при проверке modifiedTime: %s", exc)
     
     # Fallback: хэш-проверка с debounce
     now = time.time()
