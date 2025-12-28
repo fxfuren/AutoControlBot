@@ -1,13 +1,16 @@
+import asyncio
 import json
 import hashlib
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -28,6 +31,16 @@ _service_cache: dict[str, Any] = {
     "created_at": 0.0
 }
 
+# Cache for credentials (lightweight, for aiohttp requests)
+_creds_cache: dict[str, Any] = {
+    "creds": None,
+    "token": None,
+    "expiry": None
+}
+
+# Singleton aiohttp ClientSession for connection pooling
+_aiohttp_session: aiohttp.ClientSession | None = None
+
 
 def _require_config(value: str | None, name: str) -> str:
     if not value:
@@ -42,6 +55,63 @@ def _get_spreadsheet_id() -> str:
     if not match:
         raise RuntimeError("Не удалось определить идентификатор таблицы из GOOGLE_SHEETS_URL")
     return match.group(1)
+
+
+def _get_creds() -> tuple[Credentials, str]:
+    """
+    Возвращает учетные данные и действительный токен доступа для REST API.
+    Кэширует credentials и обновляет токен только при истечении срока действия.
+    Это легковесная альтернатива полному service объекту для частых запросов.
+    """
+    global _creds_cache
+    
+    # Проверяем, нужно ли обновить токен
+    now = datetime.now(timezone.utc)
+    
+    if _creds_cache["creds"] is None:
+        # Создаём credentials впервые
+        creds_path = Path(_require_config(GOOGLE_CREDS_PATH, "GOOGLE_CREDS_PATH"))
+        if not creds_path.exists():
+            raise RuntimeError(f"Файл с учетными данными не найден: {creds_path}")
+        
+        creds = Credentials.from_service_account_file(
+            str(creds_path), 
+            scopes=SCOPES
+        )
+        _creds_cache["creds"] = creds
+        _creds_cache["expiry"] = None
+    
+    creds = _creds_cache["creds"]
+    
+    # Проверяем, нужно ли обновить токен
+    if (
+        _creds_cache["token"] is None 
+        or _creds_cache["expiry"] is None 
+        or now >= _creds_cache["expiry"]
+    ):
+        # Обновляем токен
+        if not creds.valid:
+            creds.refresh(Request())
+        
+        _creds_cache["token"] = creds.token
+        _creds_cache["expiry"] = creds.expiry
+        logger.debug("🔑 Обновлён токен доступа для REST API")
+    
+    return creds, _creds_cache["token"]
+
+
+async def _get_aiohttp_session() -> aiohttp.ClientSession:
+    """
+    Возвращает singleton aiohttp ClientSession для повторного использования соединений.
+    Создаёт новую сессию, если она ещё не существует или была закрыта.
+    """
+    global _aiohttp_session
+    
+    if _aiohttp_session is None or _aiohttp_session.closed:
+        _aiohttp_session = aiohttp.ClientSession()
+        logger.debug("🌐 Создана новая aiohttp ClientSession")
+    
+    return _aiohttp_session
 
 
 def _get_service():
@@ -217,59 +287,73 @@ def validate_table(access_raw: list[list[str]], mapping_raw: list[list[str]]):
 #      ОПРЕДЕЛЕНИЕ ИЗМЕНЕНИЙ
 # ===========================
 
-def sheet_changed():
+async def sheet_changed():
     """
-    Определение изменений:
-    1) modifiedTime (мгновенно)
-    2) fallback-хэш с debounce (1 раз в 10 сек)
+    Асинхронное определение изменений в таблице:
+    1) Использует aiohttp для лёгковесной проверки modifiedTime через REST API
+    2) При неудаче или fallback использует хэш-проверку с debounce (1 раз в 10 сек)
+    3) Тяжёлая операция load_raw_values выполняется в отдельном потоке
     """
     global last_modified, last_hash, last_hash_time
 
-    service = _get_service()
     spreadsheet_id = _get_spreadsheet_id()
-
+    
+    # Пытаемся получить modifiedTime через REST API (лёгковесный способ)
     try:
-        meta = service.spreadsheets().get(
-            spreadsheetId=spreadsheet_id,
-            fields="properties.modifiedTime"
-        ).execute()
-
-        modified = meta["properties"]["modifiedTime"]
-        new_time = datetime.fromisoformat(modified.replace("Z", "+00:00"))
-
-        if last_modified is None:
-            last_modified = new_time
-            return True
-
-        if new_time != last_modified:
-            last_modified = new_time
-            return True
-
-        return False
-
+        creds, token = _get_creds()
+        
+        url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}"
+        params = {"fields": "properties.modifiedTime"}
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        session = await _get_aiohttp_session()
+        async with session.get(url, params=params, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                modified = data["properties"]["modifiedTime"]
+                new_time = datetime.fromisoformat(modified.replace("Z", "+00:00"))
+                
+                if last_modified is None:
+                    last_modified = new_time
+                    return True
+                
+                if new_time != last_modified:
+                    last_modified = new_time
+                    return True
+                
+                return False
+            else:
+                logger.warning(
+                    "⚠️ Не удалось получить modifiedTime через REST API: %d", 
+                    response.status
+                )
     except RefreshError as exc:
         _raise_refresh_error(exc)
-    except HttpError:
-        pass
-
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        logger.warning("⚠️ Ошибка соединения при проверке modifiedTime: %s", exc)
+    except Exception as exc:
+        logger.warning("⚠️ Неожиданная ошибка при проверке modifiedTime: %s", exc)
+    
+    # Fallback: хэш-проверка с debounce
     now = time.time()
-
+    
     if now - last_hash_time < 10:
         return False
-
+    
     last_hash_time = now
-
-    rows = load_raw_values("Доступы")
+    
+    # Выполняем тяжёлую операцию в отдельном потоке
+    rows = await asyncio.to_thread(load_raw_values, "Доступы")
     new_hash = hashlib.md5(json.dumps(rows, sort_keys=True).encode()).hexdigest()
-
+    
     if last_hash is None:
         last_hash = new_hash
         return True
-
+    
     if new_hash != last_hash:
         last_hash = new_hash
         return True
-
+    
     return False
 
 
