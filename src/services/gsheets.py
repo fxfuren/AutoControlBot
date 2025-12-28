@@ -3,7 +3,7 @@ import json
 import hashlib
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -63,7 +63,7 @@ def _get_creds() -> tuple[Credentials, str]:
     global _creds_cache
     
     # Проверяем, нужно ли обновить токен
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     if _creds_cache["creds"] is None:
         # Создаём credentials впервые
