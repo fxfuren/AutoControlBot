@@ -30,7 +30,7 @@ class SheetSyncWorker:
 
         while not stop_event.is_set():
             try:
-                if await sheet_changed():
+                if sheet_changed():
                     await self._handle_sheet_update()
 
                 await asyncio.wait_for(stop_event.wait(), timeout=self._interval)
@@ -48,8 +48,7 @@ class SheetSyncWorker:
     async def _handle_sheet_update(self) -> None:
         logger.info("🔄 Обнаружены изменения в таблице — обновляю кэш")
         old_data = self._cache.as_mapping()
-        # Offload blocking load_table to thread
-        new_rows = await asyncio.to_thread(load_table)
+        new_rows = load_table()
         self._cache.replace(new_rows)
         self._cache.save_snapshot()
         await self._publish_events(old_data)
