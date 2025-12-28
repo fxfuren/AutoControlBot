@@ -1,7 +1,6 @@
 import json
 import hashlib
 import re
-import time
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -12,7 +11,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from config import GOOGLE_CREDS_PATH, GOOGLE_SHEETS_URL, GOOGLE_SERVICE_TTL_MINUTES
+from config import GOOGLE_CREDS_PATH, GOOGLE_SHEETS_URL
 from utils.logger import logger
 from services.user_data import normalize_user_record, UserDataError
 
@@ -21,12 +20,6 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 last_modified: datetime | None = None
 last_hash: str | None = None
 last_hash_time = 0.0      # для debounce хэша
-
-# Cache for Google API service with TTL
-_service_cache: dict[str, Any] = {
-    "service": None,
-    "created_at": 0.0
-}
 
 
 def _require_config(value: str | None, name: str) -> str:
@@ -44,54 +37,14 @@ def _get_spreadsheet_id() -> str:
     return match.group(1)
 
 
+@lru_cache(maxsize=1)
 def _get_service():
-    """
-    Возвращает Google Sheets API service с управляемым временем жизни (TTL).
-    Пересоздает service объект каждые GOOGLE_SERVICE_TTL_MINUTES минут
-    для освобождения накопленных HTTP буферов и соединений.
-    """
-    global _service_cache
-    
-    current_time = time.time()
-    ttl_seconds = GOOGLE_SERVICE_TTL_MINUTES * 60
-    
-    # Проверяем, нужно ли пересоздать service
-    if (
-        _service_cache["service"] is None
-        or (current_time - _service_cache["created_at"]) > ttl_seconds
-    ):
-        # Закрываем старую HTTP сессию, если она существует
-        old_service_existed = _service_cache["service"] is not None
-        if old_service_existed:
-            try:
-                # Закрываем HTTP соединение
-                if hasattr(_service_cache["service"], "_http"):
-                    _service_cache["service"]._http.close()
-                logger.info(
-                    "🔄 Закрываю старый Google API service (TTL истёк: %d минут)",
-                    GOOGLE_SERVICE_TTL_MINUTES
-                )
-            except Exception as exc:
-                logger.warning(
-                    "⚠️ Не удалось корректно закрыть старый service: %s", exc
-                )
-        
-        # Создаем новый service
-        creds_path = Path(_require_config(GOOGLE_CREDS_PATH, "GOOGLE_CREDS_PATH"))
-        if not creds_path.exists():
-            raise RuntimeError(f"Файл с учетными данными не найден: {creds_path}")
-        
-        creds = Credentials.from_service_account_file(str(creds_path), scopes=SCOPES)
-        _service_cache["service"] = build("sheets", "v4", credentials=creds)
-        _service_cache["created_at"] = current_time
-        
-        # Логируем создание/пересоздание
-        if old_service_existed:
-            logger.info("✔️ Google API service успешно пересоздан")
-        else:
-            logger.info("✔️ Google API service создан впервые")
-    
-    return _service_cache["service"]
+    creds_path = Path(_require_config(GOOGLE_CREDS_PATH, "GOOGLE_CREDS_PATH"))
+    if not creds_path.exists():
+        raise RuntimeError(f"Файл с учетными данными не найден: {creds_path}")
+
+    creds = Credentials.from_service_account_file(str(creds_path), scopes=SCOPES)
+    return build("sheets", "v4", credentials=creds)
 
 
 def _raise_refresh_error(exc: RefreshError) -> None:
@@ -118,12 +71,7 @@ def load_raw_values(sheet_name: str) -> list[list[str]]:
     except RefreshError as exc:
         _raise_refresh_error(exc)
 
-    values = result["valueRanges"][0].get("values", [])
-    
-    # Явно удаляем большой объект result для освобождения памяти
-    del result
-    
-    return values
+    return result["valueRanges"][0].get("values", [])
 
 
 # ===========================
@@ -252,6 +200,7 @@ def sheet_changed():
     except HttpError:
         pass
 
+    import time
     now = time.time()
 
     if now - last_hash_time < 10:
@@ -295,9 +244,6 @@ def load_table() -> list[dict[str, Any]]:
         for row in mapping_raw[1:]
         if len(row) >= 2 and row[0].strip()
     }
-    
-    # Освобождаем память от больших промежуточных объектов
-    del mapping_raw
 
     data = []
 
@@ -324,7 +270,7 @@ def load_table() -> list[dict[str, Any]]:
                     logger.warning(
                         f"⚠️ В таблице 'Доступы' указано '+', "
                         f"но чат '{col_name}' отсутствует в листе 'Чаты' – пропускаю"
-                    )
+            )
 
 
 
@@ -339,10 +285,6 @@ def load_table() -> list[dict[str, Any]]:
             data.append(normalize_user_record(record))
         except UserDataError as exc:
             logger.warning("Пропускаю строку tg_id=%s: %s", tg_id, exc)
-    
-    # Освобождаем память от больших промежуточных объектов
-    del access_raw
-    del rows
 
     logger.info(f"✔ Загружено {len(data)} строк")
     return data

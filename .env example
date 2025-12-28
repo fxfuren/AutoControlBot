@@ -1,4 +1,3 @@
 BOT_TOKEN=ТОКЕН_ТВОЕГО_БОТА_ОТ_BOTFATHER
 GOOGLE_SHEETS_URL=https://docs.google.com/spreadsheets/d/1A_xgsm6gbMyAg6Rsfi8GH-NC1ooiwwiHruF8SMB2L-s/edit
 GOOGLE_CREDS_PATH=service_account.json
-GOOGLE_SERVICE_TTL_MINUTES=30
