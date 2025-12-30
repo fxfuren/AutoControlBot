@@ -2,7 +2,7 @@ from typing import Sequence
 
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from services.access_service import ChatAccess
+from src.services.access_service import ChatAccess
 
 
 def chats_keyboard(chats: Sequence[ChatAccess]):

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import traceback
 
 from typing import Mapping
 
-from services.gsheets import load_table, sheet_changed
-from services.notifier import NotificationService, detect_changes
-from storage.cache import CacheRepository
-from utils.logger import logger
+from src.services.gsheets import load_table, sheet_changed
+from src.services.notifier import NotificationService, detect_changes
+from src.storage.cache import CacheRepository
+from src.utils.logger import logger
+from src.utils.memory_monitor import log_memory_usage
 
 
 class SheetSyncWorker:
@@ -20,16 +22,26 @@ class SheetSyncWorker:
         notifier: NotificationService,
         *,
         interval: float = 2.0,
+        memory_log_interval: int = 50,  # Логировать память каждые N итераций
     ) -> None:
         self._cache = cache
         self._notifier = notifier
         self._interval = interval
+        self._memory_log_interval = memory_log_interval
+        self._iteration_count = 0
 
     async def run(self, stop_event: asyncio.Event) -> None:
         logger.info("▶ Запускаю воркер синхронизации таблицы")
 
         while not stop_event.is_set():
             try:
+                self._iteration_count += 1
+                
+                # Периодический мониторинг памяти
+                if self._iteration_count % self._memory_log_interval == 0:
+                    log_memory_usage("SheetSyncWorker")
+                    gc.collect()  # Принудительная сборка мусора
+                
                 if sheet_changed():
                     await self._handle_sheet_update()
 
@@ -52,6 +64,9 @@ class SheetSyncWorker:
         self._cache.replace(new_rows)
         self._cache.save_snapshot()
         await self._publish_events(old_data)
+        
+        # Принудительная сборка мусора после обработки большого объема данных
+        gc.collect()
 
     async def _publish_events(
         self, old_data: Mapping[str, Mapping[str, object]]

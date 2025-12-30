@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramNetworkError
 
-from utils.logger import logger
+from src.utils.logger import logger
 
 
 class BotLifecycleManager:

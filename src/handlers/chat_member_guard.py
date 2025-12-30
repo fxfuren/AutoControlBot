@@ -1,9 +1,9 @@
 from aiogram import Bot, Router, types
 from aiogram.enums import ChatMemberStatus
 
-from services.chat_utils import kick_user_from_chat
-from services.container import get_container
-from utils.logger import logger
+from src.services.chat_utils import kick_user_from_chat
+from src.services.container import get_container
+from src.utils.logger import logger
 
 router = Router()
 

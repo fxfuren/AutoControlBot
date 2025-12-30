@@ -5,10 +5,10 @@ from typing import List
 
 from aiogram import Bot
 
-from services.chat_utils import ensure_invite_link, get_chat
-from services.ensure_user_can_join import ensure_user_can_join
-from storage.cache import CacheRepository
-from utils.logger import logger
+from src.services.chat_utils import ensure_invite_link, get_chat
+from src.services.ensure_user_can_join import ensure_user_can_join
+from src.storage.cache import CacheRepository
+from src.utils.logger import logger
 
 
 @dataclass(slots=True)

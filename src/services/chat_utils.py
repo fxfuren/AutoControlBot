@@ -6,7 +6,7 @@ from typing import Optional
 from aiogram import Bot, types
 from aiogram.exceptions import TelegramAPIError
 
-from utils.logger import logger
+from src.utils.logger import logger
 
 
 async def get_chat(bot: Bot, chat_id: int) -> Optional[types.Chat]:

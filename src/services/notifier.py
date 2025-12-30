@@ -8,9 +8,9 @@ from typing import Any, Iterable, List, Mapping, Optional
 
 from aiogram import Bot, types
 
-from services.chat_utils import ensure_invite_link, get_chat, kick_user_from_chat
-from services.user_data import parse_chat_ids
-from utils.logger import logger
+from src.services.chat_utils import ensure_invite_link, get_chat, kick_user_from_chat
+from src.services.user_data import parse_chat_ids
+from src.utils.logger import logger
 
 
 # ============================
@@ -46,13 +46,10 @@ class NotificationBuilder:
         """
 
         lines: List[str] = ["<b>🔔 Обновление доступа</b>"]
-        chat_cache: dict[int, Optional[types.Chat]] = {}
 
         async def _chat(chat_id: int) -> Optional[types.Chat]:
-            """Ленивая загрузка объекта чата с кешированием."""
-            if chat_id not in chat_cache:
-                chat_cache[chat_id] = await get_chat(bot, chat_id)
-            return chat_cache[chat_id]
+            """Получает объект чата без кеширования для экономии памяти."""
+            return await get_chat(bot, chat_id)
 
         async def _title(chat_id: int) -> Optional[str]:
             """Имя чата или None."""

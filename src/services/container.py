@@ -5,10 +5,10 @@ from pathlib import Path
 
 from aiogram import Bot
 
-from services.access_service import AccessService
-from services.notifier import NotificationService
-from services.updater import SheetSyncWorker
-from storage.cache import CacheRepository
+from src.services.access_service import AccessService
+from src.services.notifier import NotificationService
+from src.services.updater import SheetSyncWorker
+from src.storage.cache import CacheRepository
 
 
 @dataclass

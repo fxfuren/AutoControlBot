@@ -11,9 +11,9 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from config import GOOGLE_CREDS_PATH, GOOGLE_SHEETS_URL
-from utils.logger import logger
-from services.user_data import normalize_user_record, UserDataError
+from src.config import GOOGLE_CREDS_PATH, GOOGLE_SHEETS_URL
+from src.utils.logger import logger
+from src.services.user_data import normalize_user_record, UserDataError
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 

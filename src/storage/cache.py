@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
-from utils.logger import logger
+from src.utils.logger import logger
 
 
 class CacheRepository:
@@ -59,12 +59,21 @@ class CacheRepository:
         self._data = new_data
 
     def snapshot(self) -> Dict[str, Dict[str, Any]]:
-        """Возвращает копию текущего состояния для анализа изменений."""
-        return deepcopy(self._data)
+        """Возвращает легковесную копию текущего состояния для анализа изменений."""
+        # Копируем только ключи и простые значения, избегая deepcopy для экономии памяти
+        return {
+            key: {
+                "tg_id": user.get("tg_id"),
+                "role": user.get("role"),
+                "chats": list(user.get("chats", [])),  # Копируем только список чатов
+            }
+            for key, user in self._data.items()
+        }
 
     def get_user(self, tg_id: int) -> Dict[str, Any] | None:
         user = self._data.get(str(tg_id))
-        return deepcopy(user) if user else None
+        # Возвращаем shallow copy вместо deepcopy для производительности
+        return dict(user) if user else None
 
     def list_user_chats(self, tg_id: int) -> list[int]:
         user = self._data.get(str(tg_id))

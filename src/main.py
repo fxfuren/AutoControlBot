@@ -2,16 +2,18 @@ import asyncio
 import signal
 from contextlib import suppress
 
-from bot import bot, dp
-from handlers.chat_member_guard import router as chat_guard_router
-from handlers.start import router as start_router
-from services.bot_runner import BotLifecycleManager
-from services.container import init_services
-from utils.logger import logger
+from .bot import bot, dp
+from .handlers.chat_member_guard import router as chat_guard_router
+from .handlers.start import router as start_router
+from .services.bot_runner import BotLifecycleManager
+from .services.container import init_services
+from .utils.logger import logger
+from .utils.memory_monitor import log_memory_usage
 
 
 async def main() -> None:
     logger.info("🚀 Запуск бота")
+    log_memory_usage("Старт")
 
     services = init_services(bot)
     services.cache.load_from_disk()
@@ -26,6 +28,7 @@ async def main() -> None:
 
     def _shutdown() -> None:
         logger.info("🛑 Получен сигнал на остановку")
+        log_memory_usage("Остановка")
         lifecycle.stop()
         stop_event.set()
 
