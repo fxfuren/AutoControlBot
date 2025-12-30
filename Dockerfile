@@ -10,4 +10,4 @@ COPY service_account.json ./service_account.json
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "src/main.py"]
+CMD ["python", "-m", "src.main"]
