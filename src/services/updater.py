@@ -21,7 +21,7 @@ class SheetSyncWorker:
         cache: CacheRepository,
         notifier: NotificationService,
         *,
-        interval: float = 2.0,
+        interval: float = 10.0,  # Увеличен с 2 до 10 секунд для экономии квоты Google API
         memory_log_interval: int = 50,  # Логировать память каждые N итераций
     ) -> None:
         self._cache = cache
@@ -51,9 +51,14 @@ class SheetSyncWorker:
             except asyncio.CancelledError:
                 logger.info("⏹ Воркер синхронизации отменён")
                 break
-            except Exception:
-                logger.error("Ошибка в SheetSyncWorker:\n{}", traceback.format_exc())
-                await asyncio.sleep(1)
+            except Exception as e:
+                error_msg = str(e)
+                if "429" in error_msg or "Quota exceeded" in error_msg:
+                    logger.warning(f"⚠️ Превышена квота Google API — пауза 60 секунд")
+                    await asyncio.sleep(60)
+                else:
+                    logger.error("Ошибка в SheetSyncWorker:\n{}", traceback.format_exc())
+                    await asyncio.sleep(1)
 
         logger.info("✔ Воркер синхронизации остановлен")
 
